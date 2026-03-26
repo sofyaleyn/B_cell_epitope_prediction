@@ -1,0 +1,23 @@
+# Target configuration for the epitope prediction pipeline.
+# Each entry defines one antigen to process.
+#
+# Fields:
+#   chains:       list of chains to analyse
+#   bepipred_dir: path to folder containing BepiPred raw_output.csv
+#   discotope_dir: path to folder containing *_discotope3.csv files
+#   pdb_dir:      path to folder containing .pdb files for DiscoTope / GraphBepi
+#
+# All paths are relative to the repo root.
+
+targets:
+  ERCC1:
+    chains: [A]
+    bepipred_dir:  data/ERCC1/ERCC1_bepipred3_results
+    discotope_dir: data/ERCC1/discotope3_ERCC1_results
+    pdb_dir:       data/ERCC1/pdb
+
+  her2:
+    chains: [A]
+    pdb_dir: data/targets/her2
+    # bepipred_dir:  fill in when BepiPred results are available
+    # discotope_dir: fill in when DiscoTope results are available
