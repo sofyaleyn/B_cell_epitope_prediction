@@ -33,13 +33,13 @@ def main() -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     print(f"[{args.target}] Combining results...")
-    df = load_and_combine(target_dir)
+    df = load_and_combine(target_dir, out_dir=out_dir)
 
     out_path = out_dir / "combined_scores.csv"
     df.to_csv(out_path, index=False)
     print(f"[{args.target}] Saved: {out_path}")
 
-    for col in ["is_epitope_bepipred", "is_epitope_discotope", "is_epitope_AND"]:
+    for col in ["is_epitope_bepipred", "is_epitope_discotope", "is_epitope_graphbepi", "is_epitope_AND"]:
         if col in df.columns:
             n = df[col].sum()
             print(f"  {col}: {n} / {len(df)} ({100*n/len(df):.1f}%)")

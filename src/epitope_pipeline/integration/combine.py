@@ -1,6 +1,6 @@
 """Load and combine B-cell epitope predictions for a target.
 
-Main entry point: load_and_combine(target_dir) — auto-discovers all
+Main entry point: load_and_combine(target_dir, out_dir) — auto-discovers all
 predictor result files, aligns predictions to the full antigen sequence,
 and returns a single merged DataFrame.
 
@@ -14,9 +14,13 @@ Expected target_dir layout:
     └── pdb/
         └── <pdb_stem>.pdb
 
+GraphBepi results are read from out_dir/graphbepi_raw.csv (written by predict.py).
+
 Output columns:
     res_id (int), residue (str), bepipred_score (float),
-    discotope_score (float), average_rsa (float), is_epitope (bool)
+    discotope_score (float), average_rsa (float), graphbepi_score (float),
+    is_epitope_bepipred (bool), is_epitope_discotope (bool),
+    is_epitope_graphbepi (bool), is_epitope_AND (bool)
 """
 
 from __future__ import annotations
@@ -27,22 +31,23 @@ import pandas as pd
 
 from epitope_pipeline.predictors import bepipred as _bepipred
 from epitope_pipeline.predictors import discotope as _discotope
+from epitope_pipeline.predictors.graphbepi import THRESHOLD as GRAPHBEPI_THRESHOLD
 
 BEPIPRED_THRESHOLD  = 0.50   # BepiPred-3.0 recommended default
 DISCOTOPE_THRESHOLD = 0.90   # DiscoTope-3.0 calibrated score
 
 
-def load_and_combine(target_dir: Path) -> pd.DataFrame:
+def load_and_combine(target_dir: Path, out_dir: Path | None = None) -> pd.DataFrame:
     """Discover, parse, and merge all predictor results for a target.
 
     Args:
-        target_dir: root directory for one target
-                    (e.g. data/ERCC1/).
+        target_dir: root directory for one target (e.g. data/ERCC1/).
+        out_dir:    outputs directory for the target (e.g. outputs/ERCC1/).
+                    If provided and graphbepi_raw.csv exists there, GraphBepi
+                    scores are merged in. If None, GraphBepi is skipped.
 
     Returns:
-        DataFrame (one row per residue in the antigen sequence) with
-        columns: res_id, residue, bepipred_score, discotope_score,
-        average_rsa, is_epitope.
+        DataFrame (one row per residue in the antigen sequence).
         Scores are 0.0 where a predictor had no coverage for that residue.
     """
     target_dir = Path(target_dir)
@@ -68,12 +73,30 @@ def load_and_combine(target_dir: Path) -> pd.DataFrame:
     df["bepipred_score"]  = df["bepipred_score"].fillna(0.0)
     df["discotope_score"] = df["discotope_score"].fillna(0.0)
 
+    # GraphBepi — optional, read from out_dir if available
+    gb_path = Path(out_dir) / "graphbepi_raw.csv" if out_dir else None
+    if gb_path and gb_path.exists():
+        gb = pd.read_csv(gb_path)[["res_id", "score"]].rename(
+            columns={"score": "graphbepi_score"}
+        )
+        df = df.merge(gb, on="res_id", how="left")
+    else:
+        df["graphbepi_score"] = float("nan")
+    df["graphbepi_score"] = df["graphbepi_score"].fillna(0.0)
+
     df["is_epitope_bepipred"]  = df["bepipred_score"]  >= BEPIPRED_THRESHOLD
     df["is_epitope_discotope"] = df["discotope_score"] >= DISCOTOPE_THRESHOLD
-    df["is_epitope_AND"]       = df["is_epitope_bepipred"] | df["is_epitope_discotope"]
+    df["is_epitope_graphbepi"] = df["graphbepi_score"] >= GRAPHBEPI_THRESHOLD
+    df["is_epitope_AND"] = (
+        df["is_epitope_bepipred"]
+        | df["is_epitope_discotope"]
+        | df["is_epitope_graphbepi"]
+    )
 
-    return df[["res_id", "residue", "bepipred_score", "discotope_score", "average_rsa",
-               "is_epitope_bepipred", "is_epitope_discotope", "is_epitope_AND"]]
+    return df[["res_id", "residue",
+               "bepipred_score", "discotope_score", "average_rsa", "graphbepi_score",
+               "is_epitope_bepipred", "is_epitope_discotope", "is_epitope_graphbepi",
+               "is_epitope_AND"]]
 
 
 # ---------------------------------------------------------------------------
