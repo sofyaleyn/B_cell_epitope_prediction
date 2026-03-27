@@ -1,105 +1,108 @@
-"""CLI to run the full epitope prediction pipeline for one or more targets.
+"""Run the full epitope prediction pipeline for one or more targets.
+
+Executes all three stages in sequence:
+    1. predict   — run BepiPred, DiscoTope, GraphBepi
+    2. combine   — merge results into combined_scores.csv
+    3. report    — plots, tables, HTML, notebook
 
 Usage:
-    uv run python scripts/run_pipeline.py --target her2
-    uv run python scripts/run_pipeline.py --target her2 --target egfr
-    uv run python scripts/run_pipeline.py          # runs all targets in config
+    uv run python scripts/run_pipeline.py --target ERCC1
+    uv run python scripts/run_pipeline.py --target ERCC1 --target E3
+    uv run python scripts/run_pipeline.py                    # all targets in config
+    uv run python scripts/run_pipeline.py --skip-notebook
+    uv run python scripts/run_pipeline.py --predictors graphbepi
 """
 
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
+
+REPO_ROOT = Path(__file__).parents[1]
+sys.path.insert(0, str(REPO_ROOT / "src"))
 
 import yaml
 
-REPO_ROOT = Path(__file__).parents[1]
-CONFIG_PATH = REPO_ROOT / "config" / "targets.yaml"
-OUTPUTS_DIR = REPO_ROOT / "outputs"
+from epitope_pipeline.config import resolve_target_config
+from epitope_pipeline.integration.combine import load_and_combine
+from epitope_pipeline.reporting.plots import plot_epitope_scores
+from epitope_pipeline.reporting.tables import export_epitope_table
+from epitope_pipeline.reporting.report import export_html
+from epitope_pipeline.reporting.notebook import execute_template
+from epitope_pipeline.predictors import bepipred, discotope, graphbepi
+
+PREDICTORS = {
+    "bepipred":  bepipred.run,
+    "discotope": discotope.run,
+    "graphbepi": graphbepi.run,
+}
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run B-cell epitope prediction pipeline")
+    parser = argparse.ArgumentParser(description="Run full B-cell epitope prediction pipeline")
     parser.add_argument(
-        "--target",
-        action="append",
-        dest="targets",
+        "--target", action="append", dest="targets", metavar="NAME",
+        help="Target name from config/targets.yaml (repeat for multiple; default: all)",
+    )
+    parser.add_argument(
+        "--predictors", nargs="+", choices=[*PREDICTORS, "all"], default=["all"],
         metavar="NAME",
-        help="Target name from config/targets.yaml (repeat for multiple targets; default: all)",
+        help=f"Predictors to run: all | {' | '.join(PREDICTORS)}",
+    )
+    parser.add_argument(
+        "--skip-notebook", action="store_true",
+        help="Skip notebook execution",
     )
     args = parser.parse_args()
 
-    config = yaml.safe_load(CONFIG_PATH.read_text())
-    all_targets = {t["name"]: t for t in config["targets"]}
+    # Load yaml only to enumerate all targets for the default "run all" case
+    config = yaml.safe_load((REPO_ROOT / "config" / "targets.yaml").read_text())
+    all_targets = list(config["targets"].keys())
+    selected = args.targets if args.targets else all_targets
 
-    selected = args.targets if args.targets else list(all_targets.keys())
+    to_run = list(PREDICTORS) if "all" in args.predictors else args.predictors
+
     for name in selected:
-        if name not in all_targets:
-            raise SystemExit(f"Unknown target '{name}'. Available: {list(all_targets)}")
-
-    for name in selected:
-        _run_target(all_targets[name])
+        _run_target(name, to_run, args.skip_notebook)
 
 
-def _run_target(target: dict) -> None:
-    from epitope_pipeline.predictors import bepipred, discotope, graphbepi
-    from epitope_pipeline.integration.combine import combine
-    from epitope_pipeline.reporting.plots import plot_epitope_scores
-    from epitope_pipeline.reporting.report import export_html
-    from Bio import SeqIO
-    from Bio.PDB import PDBParser
+def _run_target(name: str, predictors: list[str], skip_notebook: bool) -> None:
+    cfg = resolve_target_config(name, REPO_ROOT)
+    target_dir = REPO_ROOT / "data" / name
+    out_dir    = cfg["out_dir"]
 
-    name = target["name"]
-    out_dir = OUTPUTS_DIR / name
-    out_dir.mkdir(parents=True, exist_ok=True)
+    print(f"[{name}] Stage 1 — predictors: {predictors}")
+    for predictor in predictors:
+        print(f"[{name}]   running {predictor}...")
+        try:
+            PREDICTORS[predictor](cfg)
+        except NotImplementedError:
+            print(f"[{name}]   {predictor} — not yet implemented, skipping.")
+        except Exception as e:
+            print(f"[{name}]   {predictor} — ERROR: {e}")
+            raise
 
-    print(f"[{name}] Running predictors...")
+    print(f"[{name}] Stage 2 — combining results...")
+    df = load_and_combine(target_dir, out_dir=out_dir)
+    df.to_csv(out_dir / "combined_scores.csv", index=False)
+    for col in ["is_epitope_bepipred", "is_epitope_discotope", "is_epitope_graphbepi", "is_epitope_AND"]:
+        if col in df.columns:
+            n = df[col].sum()
+            print(f"  {col}: {n} / {len(df)} ({100*n/len(df):.1f}%)")
 
-    results = {}
-    for chain in target["chains"]:
-        pdb_path = REPO_ROOT / target["pdb"]
-        chain_pdb_path = REPO_ROOT / target["chain_pdbs"][chain]
-
-        sequence = _extract_sequence(chain_pdb_path, chain)
-
-        results["bepipred"] = bepipred.run(
-            sequence=sequence,
-            chain=chain,
-            cache_path=out_dir / "bepipred_raw.json",
+    print(f"[{name}] Stage 3 — generating report...")
+    plot_epitope_scores(df, name, out_dir / "B_cell_epitope_combined.png")
+    export_epitope_table(df, out_dir / "epitope_table.csv")
+    export_html(df, name, out_dir / "summary_report.html")
+    if not skip_notebook:
+        execute_template(
+            template=REPO_ROOT / "notebooks" / "analysis.ipynb",
+            output=out_dir / "analysis.ipynb",
+            target=name,
         )
-        results["discotope"] = discotope.run(
-            pdb_path=chain_pdb_path,
-            chain=chain,
-            cache_path=out_dir / "discotope_raw.json",
-        )
-        results["graphbepi"] = graphbepi.run(
-            pdb_path=chain_pdb_path,
-            chain=chain,
-            cache_path=out_dir / "graphbepi_raw.csv",
-        )
-
-    print(f"[{name}] Combining results...")
-    combined = combine(results)
-    combined.to_csv(out_dir / "combined_scores.csv", index=False)
-
-    print(f"[{name}] Generating report...")
-    plot_epitope_scores(combined, name, out_dir / "epitope_plot.png")
-    export_html(combined, name, out_dir / "summary_report.html")
 
     print(f"[{name}] Done → {out_dir}")
-
-
-def _extract_sequence(pdb_path: Path, chain: str) -> str:
-    from Bio.PDB import PDBParser
-    from Bio.SeqUtils import seq1
-
-    parser = PDBParser(QUIET=True)
-    structure = parser.get_structure("protein", str(pdb_path))
-    residues = [
-        r for r in structure[0][chain].get_residues()
-        if r.get_id()[0] == " "  # exclude HETATM
-    ]
-    return "".join(seq1(r.get_resname()) for r in residues)
 
 
 if __name__ == "__main__":

@@ -6,9 +6,9 @@ Saves raw results to outputs/<target>/:
     graphbepi_raw.csv
 
 Usage:
-    uv run python scripts/predict.py --target ERCC1 --predictors all
-    uv run python scripts/predict.py --target ERCC1 --predictors graphbepi
-    uv run python scripts/predict.py --target ERCC1 --predictors bepipred discotope
+    uv run python scripts/predict.py --target <TARGET> --predictors all
+    uv run python scripts/predict.py --target <TARGET> --predictors graphbepi
+    uv run python scripts/predict.py --target <TARGET> --predictors bepipred discotope
 """
 
 from __future__ import annotations
@@ -20,8 +20,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).parents[1]
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
-import yaml
-
+from epitope_pipeline.config import resolve_target_config
 from epitope_pipeline.predictors import bepipred, discotope, graphbepi
 
 PREDICTORS = {
@@ -41,22 +40,7 @@ def main() -> None:
                         help=f"Predictors to run: all | {' | '.join(PREDICTORS)}")
     args = parser.parse_args()
 
-    config = yaml.safe_load((REPO_ROOT / "config" / "targets.yaml").read_text())
-    if args.target not in config["targets"]:
-        raise SystemExit(
-            f"Unknown target '{args.target}'. Available: {list(config['targets'])}"
-        )
-
-    target_config = config["targets"][args.target]
-
-    # Resolve relative paths to absolute and inject runtime dirs
-    for key in ("bepipred_dir", "discotope_dir", "pdb_dir"):
-        if key in target_config:
-            target_config[key] = REPO_ROOT / target_config[key]
-
-    out_dir = REPO_ROOT / "outputs" / args.target
-    out_dir.mkdir(parents=True, exist_ok=True)
-    target_config["out_dir"] = out_dir
+    target_config = resolve_target_config(args.target, REPO_ROOT)
 
     to_run = list(PREDICTORS) if "all" in args.predictors else args.predictors
 

@@ -9,8 +9,8 @@ Reads outputs/<target>/combined_scores.csv and writes:
     analysis.ipynb          (executed notebook)
 
 Usage:
-    uv run python scripts/report.py --target ERCC1
-    uv run python scripts/report.py --target ERCC1 --skip-notebook
+    uv run python scripts/report.py --target <TARGET>
+    uv run python scripts/report.py --target <TARGET> --skip-notebook
 """
 
 from __future__ import annotations
