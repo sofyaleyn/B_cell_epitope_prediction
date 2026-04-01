@@ -50,10 +50,10 @@ def parse_results_dir(results_dir: Path, pdb_dir: Path) -> pd.DataFrame:
         Residue identity is taken from the first structure that covers each
         position.
     """
-    pdb_stems = {p.stem for p in pdb_dir.glob("*.pdb")}
+    pdb_stems = {p.stem.lower() for p in pdb_dir.glob("*.pdb")}
     csv_paths = [
         p for p in results_dir.glob("*.csv")
-        if p.stem in pdb_stems
+        if any(p.stem.lower().startswith(stem) for stem in pdb_stems)
     ]
     if not csv_paths:
         raise FileNotFoundError(

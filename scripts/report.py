@@ -4,6 +4,7 @@ Reads outputs/<target>/combined_scores.csv and writes:
     bepipred_profile.png
     discotope_profile.png
     B_cell_epitope_combined.png
+    B_cell_epitope_combined_with_interface.png  (only with --include-interface)
     epitope_table.csv
     summary_report.html
     analysis.ipynb          (executed notebook)
@@ -11,6 +12,7 @@ Reads outputs/<target>/combined_scores.csv and writes:
 Usage:
     uv run python scripts/report.py --target <TARGET>
     uv run python scripts/report.py --target <TARGET> --skip-notebook
+    uv run python scripts/report.py --target <TARGET> --include-interface
 """
 
 from __future__ import annotations
@@ -23,11 +25,32 @@ REPO_ROOT = Path(__file__).parents[1]
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
 import pandas as pd
+import yaml
 
 from epitope_pipeline.reporting.plots import plot_epitope_scores
 from epitope_pipeline.reporting.tables import export_epitope_table
 from epitope_pipeline.reporting.report import export_html
 from epitope_pipeline.reporting.notebook import execute_template
+
+
+def _load_interface(target: str) -> tuple[pd.DataFrame | None, Path | None]:
+    """Load antigen interface CSV for target if configured. Returns (df, path) or (None, None)."""
+    config_path = REPO_ROOT / "config" / "targets.yaml"
+    with open(config_path) as f:
+        config = yaml.safe_load(f)
+
+    target_cfg = config.get("targets", {}).get(target, {})
+    rel_path = target_cfg.get("antigen_interface")
+    if not rel_path:
+        return None, None
+
+    interface_path = REPO_ROOT / rel_path
+    if not interface_path.exists():
+        print(f"[{target}] WARNING: antigen_interface path not found: {interface_path} — skipping interface panel")
+        return None, None
+
+    df = pd.read_csv(interface_path).rename(columns={"position": "res_id", "amino_acid": "residue"})
+    return df, interface_path
 
 
 def main() -> None:
@@ -36,6 +59,9 @@ def main() -> None:
                         help="Target name matching a folder under outputs/")
     parser.add_argument("--skip-notebook", action="store_true",
                         help="Skip notebook execution (plots and tables only)")
+    parser.add_argument("--include-interface", action="store_true",
+                        help="Overlay antigen-antibody interface contacts on the combined plot "
+                             "(requires antigen_interface field in config/targets.yaml)")
     args = parser.parse_args()
 
     out_dir = REPO_ROOT / "outputs" / args.target
@@ -47,8 +73,22 @@ def main() -> None:
         )
 
     df = pd.read_csv(csv_path)
+
+    # Resolve interface data if requested
+    interface_df = None
+    interface_path = None
+    if args.include_interface:
+        interface_df, interface_path = _load_interface(args.target)
+        if interface_df is None:
+            print(f"[{args.target}] No interface data available — generating plain combined plot only")
+
     print(f"[{args.target}] Generating plots...")
-    plot_epitope_scores(df, args.target, out_dir / "B_cell_epitope_combined.png")
+    combined_plot_path = out_dir / "B_cell_epitope_combined.png"
+    # Always generate the plain combined plot
+    plot_epitope_scores(df, args.target, combined_plot_path)
+    # Generate interface-annotated plot if interface data available
+    if interface_df is not None:
+        plot_epitope_scores(df, args.target, combined_plot_path, interface_df=interface_df)
 
     print(f"[{args.target}] Exporting tables...")
     export_epitope_table(df, out_dir / "epitope_table.csv")
@@ -62,6 +102,7 @@ def main() -> None:
             template=REPO_ROOT / "notebooks" / "analysis.ipynb",
             output=out_dir / "analysis.ipynb",
             target=args.target,
+            INTERFACE_CSV=str(interface_path) if interface_path is not None else "",
         )
 
     print(f"[{args.target}] Done → {out_dir}")
