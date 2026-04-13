@@ -1,12 +1,12 @@
 """GraphBepi local runner and output parser.
 
-Runs graphbepi/test.py on cleaned single-chain PDB files (CPU only).
+Runs graphbepi/test.py on cleaned single-chain PDB files.
 Pipeline entry point: run(target_config)
 
 Workflow per chain:
   1. Detect chains present in PDB; warn if multi-chain.
   2. Write ATOM-only, single-chain PDB to out_dir/clean_pdb/.
-  3. Call test.py (-p -i <clean.pdb> -o <graphbepi_out/> --gpu -1 --threshold ...).
+  3. Call test.py (-p -i <clean.pdb> -o <graphbepi_out/> --gpu 0 --threshold ...).
   4. Parse <pdb_stem>.csv output → standard schema.
   5. Save per-chain CSV (graphbepi_<chain>.csv) + combined graphbepi_raw.csv.
 
@@ -87,7 +87,7 @@ def run(target_config: dict) -> None:
 
         for chain_id in to_process:
             pdb_stem   = pdb_path.stem
-            clean_name = f"{pdb_stem}_{chain_id}"
+            clean_name = pdb_stem if pdb_stem.endswith(f"_{chain_id}") else f"{pdb_stem}_{chain_id}"
             clean_pdb  = clean_pdb_dir / f"{clean_name}.pdb"
             _clean_pdb(pdb_path, chain_id, clean_pdb)
 
@@ -160,6 +160,8 @@ def _clean_pdb(pdb_path: Path, chain_id: str, out_path: Path) -> None:
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     class _ChainATOMSelect(biopdb.Select):
+        def accept_model(self, model):
+            return model.id == 0  # first model only (handles NMR multi-model PDBs)
         def accept_chain(self, chain):
             return chain.id == chain_id
         def accept_atom(self, atom):
@@ -184,7 +186,7 @@ def _run_graphbepi(pdb_path: Path, graphbepi_out_dir: Path) -> None:
         "-p",                               # PDB mode (boolean flag)
         "-i", str(pdb_path),                # input PDB
         "-o", str(graphbepi_out_dir),       # output directory
-        "--gpu", "-1",                      # CPU (sets device='cpu' in test.py)
+        "--gpu", "0",                       # 0 → MPS on Apple Silicon, cuda:0 on Linux
         "--threshold", str(THRESHOLD),
     ]
     result = subprocess.run(cmd, cwd=GRAPHBEPI_DIR)

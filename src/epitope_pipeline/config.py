@@ -134,6 +134,7 @@ def _resolve_paths(entry: dict, target_name: str, repo_root: Path) -> dict:
     for key in ("bepipred_dir", "discotope_dir", "pdb_dir"):
         if key in cfg:
             cfg[key] = repo_root / cfg[key]
+    cfg["target_dir"] = repo_root / "data" / target_name
     cfg["out_dir"] = repo_root / "outputs" / target_name
     cfg["out_dir"].mkdir(parents=True, exist_ok=True)
     return cfg
