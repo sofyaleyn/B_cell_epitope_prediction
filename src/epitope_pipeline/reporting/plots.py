@@ -50,9 +50,14 @@ def plot_epitope_scores(
     ax1.legend()
 
     # DiscoTope panel
-    ax2.plot(df["res_id"], df["discotope_score"], color="green", linewidth=2, label="Score")
+    dt_score = df["discotope_score"]
+    ax2.plot(df["res_id"], dt_score, color="green", linewidth=2, label="Mean score")
+    if "discotope_score_std" in df.columns:
+        dt_std = df["discotope_score_std"]
+        ax2.fill_between(df["res_id"], dt_score - dt_std, dt_score + dt_std,
+                         color="green", alpha=0.15, label="±1 SD across structures")
     ax2.axhline(y=0.9, color="gray", linestyle="--", linewidth=1, label="Threshold (0.90)")
-    ax2.fill_between(df["res_id"], 0, df["discotope_score"],
+    ax2.fill_between(df["res_id"], 0, dt_score,
                      where=dt_epitope, alpha=0.4, color="mediumseagreen", label="Epitope")
     ax2.set_ylabel("DiscoTope Score", fontsize=11, fontweight="bold")
     ax2.set_title(f"Conformational B-cell Epitopes (DiscoTope 3.0) — {target_name}", fontsize=13, fontweight="bold")
@@ -66,9 +71,14 @@ def plot_epitope_scores(
     if has_graphbepi:
         ax3 = fig.add_subplot(gs[2], sharex=ax1)
         gb_epitope = df.get("is_epitope_graphbepi", False)
-        ax3.plot(df["res_id"], df["graphbepi_score"], color="steelblue", linewidth=2, label="Score")
+        gb_score = df["graphbepi_score"]
+        ax3.plot(df["res_id"], gb_score, color="steelblue", linewidth=2, label="Mean score")
+        if "graphbepi_score_std" in df.columns:
+            gb_std = df["graphbepi_score_std"]
+            ax3.fill_between(df["res_id"], gb_score - gb_std, gb_score + gb_std,
+                             color="steelblue", alpha=0.15, label="±1 SD across structures")
         ax3.axhline(y=0.1763, color="gray", linestyle="--", linewidth=1, label="Threshold (0.1763)")
-        ax3.fill_between(df["res_id"], 0, df["graphbepi_score"],
+        ax3.fill_between(df["res_id"], 0, gb_score,
                          where=gb_epitope, alpha=0.4, color="lightsteelblue", label="Epitope")
         ax3.set_ylabel("GraphBepi Score", fontsize=11, fontweight="bold")
         ax3.set_title(f"Conformational B-cell Epitopes (GraphBepi) — {target_name}", fontsize=13, fontweight="bold")
@@ -108,3 +118,46 @@ def plot_epitope_scores(
 
     fig.savefig(save_path, dpi=300, bbox_inches="tight")
     plt.close(fig)
+
+
+def plot_per_structure(
+    csv_paths: list[Path],
+    target_name: str,
+    output_path: Path,
+    score_col: str,
+    threshold: float,
+    ylabel: str,
+    title_prefix: str,
+) -> bool:
+    """Plot per-structure scores from a list of CSVs as overlaid lines.
+
+    Each CSV must contain res_id and score_col columns.  Returns True if any
+    CSVs were found and the plot was saved, False otherwise.
+    """
+    if not csv_paths:
+        return False
+
+    colors = plt.cm.tab20.colors
+    sns.set_style("whitegrid")
+    fig, ax = plt.subplots(figsize=(14, 5))
+
+    for i, p in enumerate(sorted(csv_paths)):
+        df = pd.read_csv(p)
+        if score_col not in df.columns or "res_id" not in df.columns:
+            continue
+        label = p.stem.replace("_discotope3", "").replace("graphbepi_", "")
+        ax.plot(df["res_id"], df[score_col],
+                color=colors[i % len(colors)], linewidth=1.2, alpha=0.85, label=label)
+
+    ax.axhline(y=threshold, color="black", linestyle="--", linewidth=1,
+               label=f"Threshold ({threshold})")
+    ax.set_xlabel("Residue Position", fontsize=12)
+    ax.set_ylabel(ylabel, fontsize=12)
+    ax.set_title(f"{title_prefix} — {target_name}", fontsize=14, fontweight="bold")
+    ax.legend(fontsize=7, ncol=3, loc="upper right")
+    plt.tight_layout()
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(output_path, dpi=300, bbox_inches="tight")
+    plt.close(fig)
+    return True

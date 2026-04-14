@@ -27,7 +27,7 @@ sys.path.insert(0, str(REPO_ROOT / "src"))
 import pandas as pd
 import yaml
 
-from epitope_pipeline.reporting.plots import plot_epitope_scores
+from epitope_pipeline.reporting.plots import plot_epitope_scores, plot_per_structure
 from epitope_pipeline.reporting.tables import export_epitope_table
 from epitope_pipeline.reporting.report import export_html
 from epitope_pipeline.reporting.notebook import execute_template
@@ -90,11 +90,49 @@ def main() -> None:
     if interface_df is not None:
         plot_epitope_scores(df, args.target, combined_plot_path, interface_df=interface_df)
 
+    # Per-structure DiscoTope plot (auto-discovers *Discotope* dir inside out_dir)
+    discotope_per_struct_path = None
+    discotope_multi_dirs = sorted(d for d in out_dir.iterdir()
+                                  if d.is_dir() and "discotope" in d.name.lower())
+    if discotope_multi_dirs:
+        dt_csvs = sorted(discotope_multi_dirs[0].glob("*.csv"))
+        discotope_per_struct_path = out_dir / "discotope_per_structure.png"
+        if not plot_per_structure(
+            csv_paths=dt_csvs,
+            target_name=args.target,
+            output_path=discotope_per_struct_path,
+            score_col="calibrated_score",
+            threshold=0.5,
+            ylabel="Calibrated Score",
+            title_prefix="DiscoTope 3.0: Per-Structure Predictions",
+        ):
+            discotope_per_struct_path = None
+
+    # Per-structure GraphBepi plot (graphbepi_*.csv files in out_dir, excluding raw)
+    graphbepi_per_struct_path = None
+    gb_csvs = [p for p in out_dir.glob("graphbepi_*.csv") if p.name != "graphbepi_raw.csv"]
+    if gb_csvs:
+        graphbepi_per_struct_path = out_dir / "graphbepi_per_structure.png"
+        if not plot_per_structure(
+            csv_paths=gb_csvs,
+            target_name=args.target,
+            output_path=graphbepi_per_struct_path,
+            score_col="score",
+            threshold=0.1763,
+            ylabel="Score",
+            title_prefix="GraphBepi: Per-Structure Predictions",
+        ):
+            graphbepi_per_struct_path = None
+
     print(f"[{args.target}] Exporting tables...")
     export_epitope_table(df, out_dir / "epitope_table.csv")
 
     print(f"[{args.target}] Exporting HTML report...")
-    export_html(df, args.target, out_dir / "summary_report.html")
+    export_html(
+        df, args.target, out_dir / "summary_report.html",
+        discotope_per_struct_img=discotope_per_struct_path,
+        graphbepi_per_struct_img=graphbepi_per_struct_path,
+    )
 
     if not args.skip_notebook:
         print(f"[{args.target}] Executing analysis notebook...")

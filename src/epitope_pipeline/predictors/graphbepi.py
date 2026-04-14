@@ -97,15 +97,44 @@ def run(target_config: dict) -> None:
             res_ids = _pdb_res_ids(clean_pdb, chain_id)
             df = _parse(raw_csv, chain_id, res_ids)
 
-            per_chain_path = out_dir / f"graphbepi_{chain_id}.csv"
-            df.to_csv(per_chain_path, index=False)
+            # Name per-structure CSV after the PDB stem+chain to avoid overwrites
+            # when multiple PDB files share the same chain letter.
+            per_struct_path = out_dir / f"graphbepi_{clean_name}.csv"
+            df.to_csv(per_struct_path, index=False)
 
             all_dfs.append(df)
 
     if not all_dfs:
         raise RuntimeError("GraphBepi produced no output for any configured chain.")
 
-    combined = pd.concat(all_dfs, ignore_index=True)
+    # Average scores per res_id across all structures (mirrors DiscoTope approach).
+    # Concatenating would produce duplicate res_ids, which breaks the combine step.
+    score_cols = [f"score_{i}" for i in range(len(all_dfs))]
+    merged = all_dfs[0][["res_id", "residue", "score"]].rename(
+        columns={"score": score_cols[0], "residue": "residue_0"}
+    )
+    for i, frame in enumerate(all_dfs[1:], 1):
+        right = frame[["res_id", "residue", "score"]].rename(
+            columns={"score": score_cols[i], "residue": f"residue_{i}"}
+        )
+        merged = merged.merge(right, on="res_id", how="outer")
+
+    # Take residue identity from first structure that covers each position.
+    res_cols = [f"residue_{i}" for i in range(len(all_dfs))]
+    merged["residue"] = merged["residue_0"]
+    for col in res_cols[1:]:
+        merged["residue"] = merged["residue"].fillna(merged[col])
+
+    merged["score"]        = merged[score_cols].mean(axis=1)
+    merged["score_std"]    = merged[score_cols].std(axis=1).fillna(0.0)
+    merged["n_structures"] = merged[score_cols].notna().sum(axis=1)
+    merged["is_epitope"]   = merged["score"] >= THRESHOLD
+
+    combined = (
+        merged[["res_id", "residue", "score", "score_std", "is_epitope", "n_structures"]]
+        .sort_values("res_id")
+        .reset_index(drop=True)
+    )
     combined.to_csv(cache_path, index=False)
 
 

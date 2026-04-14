@@ -50,10 +50,13 @@ def parse_results_dir(results_dir: Path, pdb_dir: Path) -> pd.DataFrame:
         Residue identity is taken from the first structure that covers each
         position.
     """
-    pdb_stems = {p.stem.lower() for p in pdb_dir.glob("*.pdb")}
+    # Match on the PDB accession prefix (first underscore-separated token, e.g. "2a1i")
+    # rather than the full stem, so naming variants like "2a1i_updated_A.pdb" and
+    # "2a1i_A_discotope3.csv" are treated as the same structure.
+    pdb_accessions = {p.stem.split("_")[0].lower() for p in pdb_dir.glob("*.pdb")}
     csv_paths = [
         p for p in results_dir.glob("*.csv")
-        if any(p.stem.lower().startswith(stem) for stem in pdb_stems)
+        if any(p.stem.lower().startswith(acc) for acc in pdb_accessions)
     ]
     if not csv_paths:
         raise FileNotFoundError(
@@ -86,16 +89,18 @@ def parse_results_dir(results_dir: Path, pdb_dir: Path) -> pd.DataFrame:
     rsa_cols   = [c for c in merged.columns if c.startswith("rsa_")]
     res_cols   = [c for c in merged.columns if c.startswith("residue_")]
 
-    merged["discotope_score"] = merged[score_cols].mean(axis=1)
-    merged["average_rsa"]     = merged[rsa_cols].mean(axis=1)
-    merged["n_structures"]    = merged[score_cols].notna().sum(axis=1)
+    merged["discotope_score"]     = merged[score_cols].mean(axis=1)
+    merged["discotope_score_std"] = merged[score_cols].std(axis=1).fillna(0.0)
+    merged["average_rsa"]         = merged[rsa_cols].mean(axis=1)
+    merged["n_structures"]        = merged[score_cols].notna().sum(axis=1)
     # take residue identity from first structure that has it
     merged["residue"] = merged[res_cols[0]]
     for col in res_cols[1:]:
         merged["residue"] = merged["residue"].fillna(merged[col])
 
     return (
-        merged[["res_id", "residue", "discotope_score", "average_rsa", "n_structures"]]
+        merged[["res_id", "residue", "discotope_score", "discotope_score_std",
+                "average_rsa", "n_structures"]]
         .sort_values("res_id")
         .reset_index(drop=True)
     )

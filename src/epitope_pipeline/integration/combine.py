@@ -58,14 +58,31 @@ def load_and_combine(target_dir: Path, out_dir: Path | None = None) -> pd.DataFr
         "residue": list(sequence),
     })
 
-    bepipred_dir  = _find_subdir(target_dir, "*bepipred*")
-    discotope_dir = _find_subdir(target_dir, "*discotope*")
-    pdb_dir       = target_dir / "pdb"
+    pdb_dir = target_dir / "pdb"
 
-    bp = _bepipred.parse_results_dir(bepipred_dir)[["res_id", "bepipred_score"]]
-    dt = _discotope.parse_results_dir(discotope_dir, pdb_dir)[
-        ["res_id", "discotope_score", "average_rsa"]
-    ]
+    # BepiPred — use cached raw CSV from out_dir if available (written by predict.py),
+    # otherwise fall back to parsing from data/ directory.
+    bp_path = Path(out_dir) / "bepipred_raw.csv" if out_dir else None
+    if bp_path and bp_path.exists():
+        bp = pd.read_csv(bp_path)[["res_id", "bepipred_score"]]
+    else:
+        bepipred_dir = _find_subdir(target_dir, "*bepipred*")
+        bp = _bepipred.parse_results_dir(bepipred_dir)[["res_id", "bepipred_score"]]
+
+    # DiscoTope — same: prefer cached raw CSV so combine.py works regardless of
+    # where the raw DiscoTope results live (data/ vs outputs/).
+    dt_path = Path(out_dir) / "discotope_raw.csv" if out_dir else None
+    if dt_path and dt_path.exists():
+        _dt_all = pd.read_csv(dt_path)
+        _dt_cols = ["res_id", "discotope_score", "average_rsa"]
+        if "discotope_score_std" in _dt_all.columns:
+            _dt_cols.append("discotope_score_std")
+        dt = _dt_all[_dt_cols]
+    else:
+        discotope_dir = _find_subdir(target_dir, "*discotope*")
+        dt = _discotope.parse_results_dir(discotope_dir, pdb_dir)[
+            ["res_id", "discotope_score", "discotope_score_std", "average_rsa"]
+        ]
 
     df = base.merge(dt, on="res_id", how="left")
     df = df.merge(bp, on="res_id", how="left")
@@ -76,9 +93,11 @@ def load_and_combine(target_dir: Path, out_dir: Path | None = None) -> pd.DataFr
     # GraphBepi — optional, read from out_dir if available
     gb_path = Path(out_dir) / "graphbepi_raw.csv" if out_dir else None
     if gb_path and gb_path.exists():
-        gb = pd.read_csv(gb_path)[["res_id", "score"]].rename(
-            columns={"score": "graphbepi_score"}
-        )
+        _gb_all = pd.read_csv(gb_path)
+        _gb_cols = {"score": "graphbepi_score"}
+        if "score_std" in _gb_all.columns:
+            _gb_cols["score_std"] = "graphbepi_score_std"
+        gb = _gb_all.rename(columns=_gb_cols)[list(_gb_cols.values()) + ["res_id"]]
         df = df.merge(gb, on="res_id", how="left")
     else:
         df["graphbepi_score"] = float("nan")
@@ -93,8 +112,12 @@ def load_and_combine(target_dir: Path, out_dir: Path | None = None) -> pd.DataFr
         | df["is_epitope_graphbepi"]
     )
 
+    dt_std = ["discotope_score_std"] if "discotope_score_std" in df.columns else []
+    gb_std = ["graphbepi_score_std"] if "graphbepi_score_std" in df.columns else []
     return df[["res_id", "residue",
-               "bepipred_score", "discotope_score", "average_rsa", "graphbepi_score",
+               "bepipred_score",
+               "discotope_score", *dt_std, "average_rsa",
+               "graphbepi_score", *gb_std,
                "is_epitope_bepipred", "is_epitope_discotope", "is_epitope_graphbepi",
                "is_epitope_AND"]]
 
