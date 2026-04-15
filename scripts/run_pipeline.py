@@ -22,6 +22,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).parents[1]
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
+import requests
 import yaml
 
 from epitope_pipeline.config import resolve_target_config
@@ -37,6 +38,14 @@ PREDICTORS = {
     "discotope": discotope.run,
     "graphbepi": graphbepi.run,
 }
+
+_NETWORK_ERRORS = (
+    requests.exceptions.ConnectionError,
+    requests.exceptions.Timeout,
+    requests.exceptions.HTTPError,
+    TimeoutError,
+    OSError,
+)
 
 
 def main() -> None:
@@ -79,6 +88,10 @@ def _run_target(name: str, predictors: list[str], skip_notebook: bool) -> None:
             PREDICTORS[predictor](cfg)
         except NotImplementedError:
             print(f"[{name}]   {predictor} — not yet implemented, skipping.")
+        except _NETWORK_ERRORS as e:
+            print(f"\n[{name}]   {predictor} — web service unavailable: {e}")
+            print(f"[{name}]   Pipeline stopped. Stages 2–3 skipped. Fix connectivity and re-run.")
+            sys.exit(1)
         except Exception as e:
             print(f"[{name}]   {predictor} — ERROR: {e}")
             raise

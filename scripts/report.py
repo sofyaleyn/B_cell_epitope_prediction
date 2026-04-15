@@ -29,7 +29,7 @@ import yaml
 
 from epitope_pipeline.reporting.plots import plot_epitope_scores, plot_per_structure
 from epitope_pipeline.reporting.tables import export_epitope_table
-from epitope_pipeline.reporting.report import export_html
+from epitope_pipeline.reporting.report import export_html, export_pdf
 from epitope_pipeline.reporting.notebook import execute_template
 
 
@@ -62,6 +62,8 @@ def main() -> None:
     parser.add_argument("--include-interface", action="store_true",
                         help="Overlay antigen-antibody interface contacts on the combined plot "
                              "(requires antigen_interface field in config/targets.yaml)")
+    parser.add_argument("--format", choices=["html", "pdf"], default="html",
+                        help="Report output format (default: html)")
     args = parser.parse_args()
 
     out_dir = REPO_ROOT / "outputs" / args.target
@@ -127,12 +129,19 @@ def main() -> None:
     print(f"[{args.target}] Exporting tables...")
     export_epitope_table(df, out_dir / "epitope_table.csv")
 
-    print(f"[{args.target}] Exporting HTML report...")
-    export_html(
-        df, args.target, out_dir / "summary_report.html",
-        discotope_per_struct_img=discotope_per_struct_path,
-        graphbepi_per_struct_img=graphbepi_per_struct_path,
-    )
+    if args.format == "pdf":
+        print(f"[{args.target}] Exporting PDF report...")
+        export_pdf(
+            df, args.target, out_dir / "summary_report.pdf",
+            discotope_per_struct_img=discotope_per_struct_path,
+            graphbepi_per_struct_img=graphbepi_per_struct_path,
+        )
+    else:
+        print(f"[{args.target}] Exporting HTML report...")
+        export_html(
+            df, args.target, out_dir / "summary_report.html",
+            interface_df=interface_df,
+        )
 
     if not args.skip_notebook:
         print(f"[{args.target}] Executing analysis notebook...")

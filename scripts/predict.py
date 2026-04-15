@@ -20,8 +20,19 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).parents[1]
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
+import requests
+
 from epitope_pipeline.config import resolve_target_config
 from epitope_pipeline.predictors import bepipred, discotope, graphbepi
+
+# Exceptions that indicate a web service is down, not a code bug.
+_NETWORK_ERRORS = (
+    requests.exceptions.ConnectionError,
+    requests.exceptions.Timeout,
+    requests.exceptions.HTTPError,
+    TimeoutError,
+    OSError,
+)
 
 PREDICTORS = {
     "bepipred":  bepipred.run,
@@ -51,6 +62,10 @@ def main() -> None:
             print(f"[{args.target}] {name} done.")
         except NotImplementedError:
             print(f"[{args.target}] {name} — not yet implemented, skipping.")
+        except _NETWORK_ERRORS as e:
+            print(f"\n[{args.target}] {name} — web service unavailable: {e}")
+            print(f"[{args.target}] Pipeline stopped. Fix connectivity and re-run predict.py.")
+            sys.exit(1)
         except Exception as e:
             print(f"[{args.target}] {name} — ERROR: {e}")
             raise

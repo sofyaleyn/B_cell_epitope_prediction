@@ -28,29 +28,80 @@ brew install brewsci/bio/dssp             # macOS — required by GraphBepi
 
 ## Usage
 
-The pipeline runs in three stages.
+### If you already have PDB files and FASTA for the target
 
-### Stage 1 — run predictors
+Register the target in `config/targets.yaml` and run:
 
 ```bash
-uv run python scripts/predict.py --target ERCC1 --predictors all
-uv run python scripts/predict.py --target ERCC1 --predictors graphbepi
-uv run python scripts/predict.py --target ERCC1 --predictors bepipred discotope
+# Run all three stages (predict → combine → report)
+uv run python scripts/run_pipeline.py --target ERCC1
+
+# Multiple targets at once
+uv run python scripts/run_pipeline.py --target ERCC1 --target E3
+
+# All targets registered in config
+uv run python scripts/run_pipeline.py
+
+# Options
+uv run python scripts/run_pipeline.py --predictors graphbepi --skip-notebook
 ```
 
-Saves raw results to `outputs/<target>/`:
+Or run stages individually:
+
+```bash
+uv run python scripts/predict.py --target ERCC1 --predictors all   # stage 1
+uv run python scripts/combine.py --target ERCC1                    # stage 2
+uv run python scripts/report.py  --target ERCC1                    # stage 3
+```
+
+---
+
+## Prerequisites — downloading structures from scratch
+
+If you don't have PDB structures yet, use these two steps first.
+
+### 1. Download all PDB structures for a UniProt entry
+
+Fetches all PDB IDs from UniProt cross-references, downloads FASTA + mmCIF (updated)
+from PDBe, and writes `chains.csv` mapping each entry to its target chain.
+
+```bash
+# default output: data/<uniprot-id>/raw_pdb/
+uv run python scripts/fetch_pdbs.py --uniprot-id P07992
+
+# explicit output directory
+uv run python scripts/fetch_pdbs.py --uniprot-id P07992 --out-dir data/my_target/raw_pdb
+```
+
+### 2. Extract target chains → PDB files
+
+Reads `chains.csv`, extracts the antigen chain from each `*_updated.cif`,
+and writes a cleaned single-chain `.pdb` per entry into `data/<uniprot-id>/pdb/`.
+
+```bash
+# default: raw_pdb = data/<uniprot-id>/raw_pdb, out = data/<uniprot-id>/pdb
+uv run python scripts/split_pdb_target_chain.py --uniprot-id P07992
+
+# explicit directories
+uv run python scripts/split_pdb_target_chain.py --uniprot-id P07992 \
+    --raw-pdb-dir data/my_target/raw_pdb --out-dir data/my_target/pdb
+```
+
+Then register the target in `config/targets.yaml` and run `run_pipeline.py` as above.
+
+> **TODO:** extract the antigen chain sequence from the downloaded per-entry FASTAs
+> (currently requires placing a FASTA manually in `data/<target>/`).
+
+---
+
+## Stage outputs
+
+**Stage 1** (`predict.py`) — saves to `outputs/<target>/`:
 - `bepipred_raw.csv` — res_id, residue, bepipred_score
 - `discotope_raw.csv` — res_id, residue, discotope_score, average_rsa, n_structures
 - `graphbepi_raw.csv` — res_id, chain, residue, score, is_epitope
 
-### Stage 2 — combine results
-
-```bash
-uv run python scripts/combine.py --target ERCC1
-```
-
-Merges all available predictor outputs onto the full antigen sequence.
-Saves `outputs/<target>/combined_scores.csv` with columns:
+**Stage 2** (`combine.py`) — saves `outputs/<target>/combined_scores.csv`:
 
 | Column | Description |
 |---|---|
@@ -67,19 +118,46 @@ Saves `outputs/<target>/combined_scores.csv` with columns:
 
 Missing predictor results are filled with 0.0 — combine works with whichever outputs exist.
 
-### Stage 3 — generate report
-
-```bash
-uv run python scripts/report.py --target ERCC1
-uv run python scripts/report.py --target ERCC1 --skip-notebook
-```
-
-Saves to `outputs/<target>/`:
+**Stage 3** (`report.py`) — saves to `outputs/<target>/`:
 - `B_cell_epitope_combined.png` — 2- or 3-panel score plot
-- `bepipred_profile.png`, `discotope_profile.png`, `graphbepi_profile.png`
+- `B_cell_epitope_combined_with_interface.png` — with interface overlay (`--include-interface`)
 - `epitope_table.csv` — residues where `is_epitope_AND == True`
 - `summary_report.html` — HTML summary
 - `analysis.ipynb` — executed notebook with inline plots
+
+```bash
+uv run python scripts/report.py --target ERCC1 --skip-notebook
+uv run python scripts/report.py --target E3 --include-interface   # requires antigen_interface in config
+```
+
+---
+
+## Utilities
+
+### Split a PDB/mmCIF by chain
+
+General-purpose chain splitter. Use when you have a single structure file and need
+to extract specific chains manually (e.g. before registering a new target).
+
+```bash
+# split all chains individually
+uv run python scripts/split_pdb.py input.pdb
+
+# keep heavy+light chains (H, L) together; split antigen (A) individually
+uv run python scripts/split_pdb.py input.pdb --groups H,L
+
+# write to a specific directory
+uv run python scripts/split_pdb.py input.cif --groups H,L --out-dir data/mytarget/pdb/
+```
+
+### Diagnose BepiPred web submission
+
+Submits a FASTA to the BepiPred-3.0 web server and prints the raw HTTP response.
+Use this when debugging the web-scraping predictor.
+
+```bash
+uv run python scripts/debug_bepipred.py --target ERCC1
+```
 
 ---
 
@@ -95,6 +173,7 @@ targets:
     bepipred_dir:  data/my_target/<bepipred_folder>
     discotope_dir: data/my_target/<discotope_folder>
     pdb_dir:       data/my_target/pdb
+    antigen_interface: data/my_target/antigen_interface.csv  # optional
 ```
 
 3. Run stages 1–3 above.
