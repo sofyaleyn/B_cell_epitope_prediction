@@ -34,7 +34,7 @@ from epitope_pipeline.predictors import discotope as _discotope
 from epitope_pipeline.predictors.graphbepi import THRESHOLD as GRAPHBEPI_THRESHOLD
 
 BEPIPRED_THRESHOLD  = 0.50   # BepiPred-3.0 recommended default
-DISCOTOPE_THRESHOLD = 0.90   # DiscoTope-3.0 calibrated score
+DISCOTOPE_THRESHOLD = 0.70   # DiscoTope-3.0 calibrated score
 
 
 def load_and_combine(target_dir: Path, out_dir: Path | None = None) -> pd.DataFrame:
@@ -127,52 +127,52 @@ def load_and_combine(target_dir: Path, out_dir: Path | None = None) -> pd.DataFr
 # ---------------------------------------------------------------------------
 
 def _load_sequence(target_dir: Path) -> str:
-    """Return the antigen sequence from the first .fasta file in target_dir.
+    """Return the antigen sequence from FASTA files in target_dir.
 
-    If the FASTA contains multiple records, the first record whose header
-    contains the target directory name (case-insensitive) is used; if none
-    match, the very first record is returned.
+    Searches all .fasta/.fa files for a record whose header contains the
+    target directory name (case-insensitive). If none match across any file,
+    falls back to the first record of the first file.
     """
-    fasta_files = list(target_dir.glob("*.fasta")) + list(target_dir.glob("*.fa"))
+    fasta_files = sorted(
+        list(target_dir.glob("*.fasta")) + list(target_dir.glob("*.fa"))
+    )
     if not fasta_files:
         raise FileNotFoundError(f"No FASTA file found in {target_dir}")
 
     target_name = target_dir.name.upper()
-    sequence = ""
-    first_sequence = ""
-    capture = False
-    found_target = False
 
-    with open(fasta_files[0]) as f:
-        for line in f:
-            line = line.strip()
-            if line.startswith(">"):
-                if capture and not found_target:
-                    first_sequence = sequence
-                    sequence = ""
-                capture = target_name in line.upper()
-                if capture:
-                    found_target = True
-            elif capture:
-                sequence += line
-
-    if not found_target:
-        # fall back to first record
-        with open(fasta_files[0]) as f:
-            capture = False
-            sequence = ""
+    # Search all files for a record whose header contains the target name.
+    for fasta_path in fasta_files:
+        sequence = ""
+        capture = False
+        with open(fasta_path) as f:
             for line in f:
                 line = line.strip()
                 if line.startswith(">"):
                     if capture:
-                        break
-                    capture = True
+                        break   # finished the matching record
+                    if target_name in line.upper():
+                        capture = True
                 elif capture:
                     sequence += line
+        if sequence:
+            return sequence.upper()
+
+    # Fall back: first record of first file.
+    sequence = ""
+    with open(fasta_files[0]) as f:
+        capture = False
+        for line in f:
+            line = line.strip()
+            if line.startswith(">"):
+                if capture:
+                    break
+                capture = True
+            elif capture:
+                sequence += line
 
     if not sequence:
         raise ValueError(f"Could not extract sequence from {fasta_files[0]}")
-
     return sequence.upper()
 
 

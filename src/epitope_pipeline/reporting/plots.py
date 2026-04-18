@@ -56,7 +56,7 @@ def plot_epitope_scores(
         dt_std = df["discotope_score_std"]
         ax2.fill_between(df["res_id"], dt_score - dt_std, dt_score + dt_std,
                          color="green", alpha=0.15, label="±1 SD across structures")
-    ax2.axhline(y=0.9, color="gray", linestyle="--", linewidth=1, label="Threshold (0.90)")
+    ax2.axhline(y=0.7, color="gray", linestyle="--", linewidth=1, label="Threshold (0.70)")
     ax2.fill_between(df["res_id"], 0, dt_score,
                      where=dt_epitope, alpha=0.4, color="mediumseagreen", label="Epitope")
     ax2.set_ylabel("DiscoTope Score", fontsize=11, fontweight="bold")

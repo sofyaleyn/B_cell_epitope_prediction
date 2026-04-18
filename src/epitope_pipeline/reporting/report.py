@@ -56,7 +56,7 @@ _TEMPLATE = """\
   {% endif %}
 
   <!-- ── DiscoTope ── -->
-  <h2>DiscoTope 3.0 <span class="meta">(structure-based · calibrated score threshold 0.90)</span></h2>
+  <h2>DiscoTope 3.0 <span class="meta">(structure-based · calibrated score threshold 0.70)</span></h2>
   {% if dt_regions %}
   <p>{{ dt_regions | length }} region{{ 's' if dt_regions | length != 1 else '' }},
      {{ dt_total }} residues:</p>
